@@ -5,7 +5,7 @@
 1. 下载并安装最新版本的Python: https://www.python.org/downloads/
 2. 安装pip：https://pip.pypa.io/en/stable/installation/
 3. 点击链接下载项目到本地：https://github.com/liyingjun/financialRisk/archive/refs/heads/main.zip
-4. 安装依赖，进入代码目录执行：`pip install -r requirements.txt`
+4. 解压代码，进入代码目录安装依赖：`pip install --index-url https://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com -r requirements.txt`
 
 ## 脚本使用介绍
 
