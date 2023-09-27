@@ -140,9 +140,16 @@ def calculate_KMV(ts_code, bdf, sdf):
     print(f"历史数据来源{source}\n")
     # 使用KMV模型计算公司1年违约概率
     # 计算对数日收益率，ln(Vt/Vt-1)
-    log_returns = np.log(sdf["收盘"] / sdf["收盘"].shift(1))
+    latest_date = datetime.datetime.strptime(bdf["REPORT_DATE"][0], "%Y-%m-%d %H:%M:%S").date()
+    one_year_ago = (latest_date - datetime.timedelta(
+        days=365))
+    if isinstance(sdf["日期"][0], datetime.date):
+        sdf = sdf[(sdf["日期"] > one_year_ago) & (sdf["日期"] <= latest_date)]
+    else:
+        sdf = sdf[(sdf["日期"] > str(one_year_ago)) & (sdf["日期"] <= str(latest_date))]
+    log_returns = np.log(sdf["收盘"] / sdf["收盘"].shift(1)).dropna()
 
-    # 计算资产均值μ和波动率σ
+    # 计算资产收益率均值μ和波动率σ
     mu = log_returns.mean()
     volatility = log_returns.std()
     # 流动负债
