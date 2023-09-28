@@ -94,7 +94,6 @@ def main():
 
     calculate_Z(ts_code, bdf, pdf, category)
     calculate_KMV(ts_code, bdf, sdf)
-    calculate_KMV_2(ts_code, bdf, sdf)
 
 
 def calculate_Z(ts_code, bdf, pdf, category):
@@ -134,7 +133,7 @@ def calculate_Z(ts_code, bdf, pdf, category):
                 3.26 * (retained_earnings[i] / total_assets[i]) + \
                 6.72 * (ebits[i] / total_assets[i]) + \
                 1.05 * (total_equities[i] / total_liabilities[i])
-        print(f"- {bdf['SECURITY_NAME_ABBR'][0]}（股票代码：{ts_code}）{dates[i][:4]}的Z评分为{Z_score}")
+        print(f"- {bdf['SECURITY_NAME_ABBR'][0]}（股票代码：{ts_code}）{dates[i][:4]}的Z评分为：{Z_score}")
 
 
 # 本函数来自知乎：https://zhuanlan.zhihu.com/p/571156389
@@ -178,27 +177,14 @@ def cal_Va_Sigma_a(V_e, Sigma_e, D, rf, t=1):
     return pd.Series(result, index=['V_a', 'Sigma_a'])
 
 
-def calculate_KMV_2(ts_code, bdf, sdf):
-    print("\n=== 违约概率计算中（KMV模型，公式2）...")
+def calculate_KMV(ts_code, bdf, sdf):
+    print("\n=== 违约概率计算中（KMV模型）...")
     source = "https://quote.eastmoney.com/concept/%s.html?from=classic" % ts_code.lower()
     print(f"历史数据来源{source}\n")
-    # 最近年报日期
-    latest_date = datetime.datetime.strptime(bdf["REPORT_DATE"][0], "%Y-%m-%d %H:%M:%S").date()
-    one_year_ago = (latest_date - datetime.timedelta(
-        days=365))
-
-    bond_china_file = f"bond_china.{latest_date.year}.csv"
-    if os.path.isfile(bond_china_file):
-        bond_china = pd.read_csv(bond_china_file, encoding="gbk")
-    else:
-        try:
-            bond_china = ak.bond_china_yield(start_date=one_year_ago.strftime("%Y%m%d"),
-                                             end_date=latest_date.strftime("%Y%m%d"))
-            # 导出为csv文件
-            bond_china.to_csv(bond_china_file, encoding="gbk")
-        except KeyError:
-            print("错误：获取国债数据失败！")
-            sys.exit(1)
+    # 流动负债
+    total_current_liabs = bdf["TOTAL_CURRENT_LIAB"]
+    # 非流动负债
+    total_noncurrent_liabs = bdf["TOTAL_NONCURRENT_LIAB"]
 
     stock_info_file = ts_code + ".info.csv"
     if os.path.isfile(stock_info_file):
@@ -213,76 +199,77 @@ def calculate_KMV_2(ts_code, bdf, sdf):
             print("错误：获取股票信息失败！")
             sys.exit(1)
 
-    national_debt = bond_china.loc[bond_china["曲线名称"] == "中债国债收益率曲线"]
-    rf = national_debt["1年"].mean() / 100
-    print(f"\n1年期国债平均收益率为：{rf}")
-    # 使用KMV模型计算公司1年违约概率
-    # 计算对数日收益率，ln(Vt/Vt-1)
-    if isinstance(sdf["日期"][0], datetime.date):
-        sdf = sdf[(sdf["日期"] > one_year_ago) & (sdf["日期"] <= latest_date)]
-    else:
-        sdf = sdf[(sdf["日期"] > str(one_year_ago)) & (sdf["日期"] <= str(latest_date))]
-    log_returns = np.log(sdf["收盘"] / sdf["收盘"].shift(1)).dropna()
+    # 最近年报日期
+    for i in range(0, 3):
+        latest_date = datetime.datetime.strptime(bdf["REPORT_DATE"][i], "%Y-%m-%d %H:%M:%S").date()
+        one_year_ago = (latest_date - datetime.timedelta(
+            days=365))
 
-    # 计算股权年化波动率σ
-    volatility = log_returns.std() * np.sqrt(252)
-    print(f"股权年化波动率：{volatility}")
-    # 流动负债
-    total_current_liabs = bdf["TOTAL_CURRENT_LIAB"]
-    # 非流动负债
-    total_noncurrent_liabs = bdf["TOTAL_NONCURRENT_LIAB"]
-    # 总市值
-    if isinstance(stock_info["date"][0], datetime.date):
-        ve = stock_info.loc[stock_info["date"] == latest_date]["value"].iloc[0]
-    else:
-        ve = stock_info.loc[stock_info["date"] == str(latest_date)]["value"].iloc[0]
-    # 数据单位为亿
-    ve = ve * 100000000
-    # 计算违约点
-    dp = total_current_liabs + 0.5 * total_noncurrent_liabs
-    # 计算资产市值和波动率
-    va_sigma = cal_Va_Sigma_a(ve, volatility, dp[0], rf, 1)
-    print(f"{latest_date} 股权市值：{ve}，资产市值：{va_sigma['V_a']}，波动率：{va_sigma['Sigma_a']}，违约点：{dp[0]}\n")
-    # 计算违约距离
-    dd = (va_sigma["V_a"] - dp[0]) / (va_sigma["V_a"] * va_sigma["Sigma_a"])
-    print(f"- 违约距离：{dd}")
-    default_probability = norm.cdf(-dd)
-    print(f"- {bdf['SECURITY_NAME_ABBR'][0]}（股票代码：{ts_code}）1年违约概率（KMV模型）为：{default_probability * 100}%")
+        bond_china_file = f"bond_china.{latest_date.year}.csv"
+        if os.path.isfile(bond_china_file):
+            bond_china = pd.read_csv(bond_china_file, encoding="gbk")
+        else:
+            try:
+                bond_china = ak.bond_china_yield(start_date=one_year_ago.strftime("%Y%m%d"),
+                                                 end_date=latest_date.strftime("%Y%m%d"))
+                # 导出为csv文件
+                bond_china.to_csv(bond_china_file, encoding="gbk")
+            except KeyError:
+                print("错误：获取国债数据失败！")
+                sys.exit(1)
 
+        national_debt = bond_china.loc[bond_china["曲线名称"] == "中债国债收益率曲线"]
+        rf = national_debt["1年"].mean() / 100
+        print(f"- {bdf['SECURITY_NAME_ABBR'][0]}（股票代码：{ts_code}）{latest_date.year}年：")
+        print(f" - 1年期国债平均收益率为：{rf}")
+        # 使用KMV模型计算公司1年违约概率
+        # 计算对数日收益率，ln(Vt/Vt-1)
+        latest_date = datetime.datetime.strptime(bdf["REPORT_DATE"][i], "%Y-%m-%d %H:%M:%S").date()
+        one_year_ago = (latest_date - datetime.timedelta(
+            days=365))
+        if not isinstance(sdf["日期"][0], datetime.date):
+            start = str(one_year_ago)
+            end = str(latest_date)
+        else:
+            start = one_year_ago
+            end = latest_date
+        df = sdf[(sdf["日期"] > start) & (sdf["日期"] <= end)]
+        log_returns = np.log(df["收盘"] / df["收盘"].shift(1)).dropna()
 
-def calculate_KMV(ts_code, bdf, sdf):
-    print("\n=== 违约概率计算中（KMV模型，公式1）...")
-    source = "https://quote.eastmoney.com/concept/%s.html?from=classic" % ts_code.lower()
-    print(f"历史数据来源{source}\n")
-    # 使用KMV模型计算公司1年违约概率
-    # 计算对数日收益率，ln(Vt/Vt-1)
-    latest_date = datetime.datetime.strptime(bdf["REPORT_DATE"][0], "%Y-%m-%d %H:%M:%S").date()
-    one_year_ago = (latest_date - datetime.timedelta(
-        days=365))
-    if isinstance(sdf["日期"][0], datetime.date):
-        sdf = sdf[(sdf["日期"] > one_year_ago) & (sdf["日期"] <= latest_date)]
-    else:
-        sdf = sdf[(sdf["日期"] > str(one_year_ago)) & (sdf["日期"] <= str(latest_date))]
-    log_returns = np.log(sdf["收盘"] / sdf["收盘"].shift(1)).dropna()
+        # 计算股权年化波动率σ
+        volatility = log_returns.std() * np.sqrt(252)
+        print(f" - 股权年化波动率：{volatility}")
+        # 总市值
+        if isinstance(stock_info["date"][0], datetime.date):
+            sdate = latest_date
+        else:
+            sdate = str(latest_date)
+        ve = stock_info.loc[stock_info["date"] == sdate]["value"].iloc[0]
+        # 数据单位为亿
+        ve = ve * 100000000
+        # 计算违约点
+        dp = total_current_liabs + 0.5 * total_noncurrent_liabs
+        # 计算资产市值和波动率
+        va_sigma = cal_Va_Sigma_a(ve, volatility, dp[i], rf, 1)
 
-    # 计算资产收益率均值μ和波动率σ
-    mu = log_returns.mean()
-    volatility = log_returns.std()
-    # 流动负债
-    total_current_liabs = bdf["TOTAL_CURRENT_LIAB"]
-    # 非流动负债
-    total_noncurrent_liabs = bdf["TOTAL_NONCURRENT_LIAB"]
-    # 总资产
-    total_assets = bdf["TOTAL_ASSETS"]
+        print(f" - 股权市值：{ve}，资产市值：{va_sigma['V_a']}，波动率：{va_sigma['Sigma_a']}，违约点：{dp[0]}")
+        # 使用公式1计算违约距离和概率
+        # 计算违约距离
+        dd = (va_sigma["V_a"] - dp[i]) / (va_sigma["V_a"] * va_sigma["Sigma_a"])
+        print(f" - 公式1：违约距离：{dd}")
+        default_probability = norm.cdf(-dd)
+        print(f" - 公式1：违约概率（KMV模型）为：{default_probability * 100}%")
 
-    # 计算违约距离DD
-    dd = ((mu - 0.5 * volatility ** 2) * 252 + \
-          np.log(total_assets[0]/(total_current_liabs[0] + total_noncurrent_liabs[0] / 2))) / (volatility * np.sqrt(252))
-    print(f"- 违约距离：{dd}")
-    # 计算违约概率N(-dd)
-    default_probability = norm.cdf(-dd)
-    print(f"- {bdf['SECURITY_NAME_ABBR'][0]}（股票代码：{ts_code}）1年违约概率（KMV模型）为：{default_probability * 100}%")
-    return default_probability
+        # 使用公式2计算违约距离和概率
+        # 资产收益率均值μ
+        mu = log_returns.mean()
+        # 计算违约距离DD
+        dd = ((mu - 0.5 * va_sigma["Sigma_a"] ** 2) + \
+              np.log(va_sigma['V_a']/(total_current_liabs[i] + total_noncurrent_liabs[i] / 2))) / (va_sigma["Sigma_a"])
+        print(f" - 公式2：违约距离：{dd}")
+        # 计算违约概率N(-dd)
+        default_probability = norm.cdf(-dd)
+        print(f" - 公式2：违约概率（KMV模型）为：{default_probability * 100}%\n")
 
 
 main()
