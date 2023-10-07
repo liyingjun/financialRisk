@@ -16,7 +16,7 @@ def main():
     parser = argparse.ArgumentParser(
         prog="calculate_Z_KMV",
         description=("获取某上市公司在指定时间段的财务数据以及股票收盘价数据，"
-            "计算其的Z评分和使用KMV模型计算其1年违约概率")
+            "计算其最近三年的Z评分和使用KMV模型计算其1年期违约概率")
     )
     parser.add_argument("code", help=("股票代码，深交所以SZ开头，"
                                       "上交所以SH开头，例如：SZ000009"))
@@ -185,6 +185,10 @@ def calculate_KMV(ts_code, bdf, sdf):
     total_current_liabs = bdf["TOTAL_CURRENT_LIAB"]
     # 非流动负债
     total_noncurrent_liabs = bdf["TOTAL_NONCURRENT_LIAB"]
+    # 总资产
+    total_assets = bdf["TOTAL_ASSETS"]
+    # 总负债
+    total_liabilities = bdf["TOTAL_LIABILITIES"]
 
     stock_info_file = ts_code + ".info.csv"
     if os.path.isfile(stock_info_file):
@@ -192,15 +196,15 @@ def calculate_KMV(ts_code, bdf, sdf):
     else:
         try:
             stock_info = ak.stock_zh_valuation_baidu(symbol=ts_code[2:],
-                                                     indicator="总市值", period="近三年")
+                                                     indicator="总市值", period="近十年")
             # 导出为csv文件
             stock_info.to_csv(stock_info_file, encoding="gbk")
         except KeyError:
             print("错误：获取股票信息失败！")
             sys.exit(1)
 
-    # 最近年报日期
     for i in range(0, 3):
+        # 获取年报日期，用于过滤当年的交易数据
         latest_date = datetime.datetime.strptime(bdf["REPORT_DATE"][i], "%Y-%m-%d %H:%M:%S").date()
         one_year_ago = (latest_date - datetime.timedelta(
             days=365))
@@ -239,24 +243,27 @@ def calculate_KMV(ts_code, bdf, sdf):
         # 计算股权年化波动率σ
         volatility = log_returns.std() * np.sqrt(252)
         print(f" - 股权年化波动率：{volatility}")
-        # 总市值
+        # 获取总市值
         if isinstance(stock_info["date"][0], datetime.date):
             sdate = latest_date
         else:
             sdate = str(latest_date)
-        ve = stock_info.loc[stock_info["date"] == sdate]["value"].iloc[0]
+        # 找到最接近年报日的市值
+        ve = test = stock_info[(stock_info["date"] <= sdate)]["value"].iloc[-1]
         # 数据单位为亿
         ve = ve * 100000000
         # 计算违约点
         dp = total_current_liabs + 0.5 * total_noncurrent_liabs
-        # 计算资产市值和波动率
+        # 计算资产市值和资产波动率
         va_sigma = cal_Va_Sigma_a(ve, volatility, dp[i], rf, 1)
 
-        print(f" - 股权市值：{ve}，资产市值：{va_sigma['V_a']}，波动率：{va_sigma['Sigma_a']}，违约点：{dp[0]}")
-        # 使用公式1计算违约距离和概率
+        print(f" - 股权市值：{ve}，资产市值：{va_sigma['V_a']}，波动率：{va_sigma['Sigma_a']}，"
+              f"违约点：{dp[i]}，负债比率：{total_liabilities[i]/total_assets[i]}")
+        # 使用公式1计算违约距离和违约概率
         # 计算违约距离
         dd = (va_sigma["V_a"] - dp[i]) / (va_sigma["V_a"] * va_sigma["Sigma_a"])
         print(f" - 公式1：违约距离：{dd}")
+        # 计算违约概率N(-dd)
         default_probability = norm.cdf(-dd)
         print(f" - 公式1：违约概率（KMV模型）为：{default_probability * 100}%")
 
@@ -264,7 +271,7 @@ def calculate_KMV(ts_code, bdf, sdf):
         # 资产收益率均值μ
         mu = log_returns.mean()
         # 计算违约距离DD
-        dd = ((mu - 0.5 * va_sigma["Sigma_a"] ** 2) + \
+        dd = ((mu - 0.5 * (va_sigma["Sigma_a"] ** 2)) + \
               np.log(va_sigma['V_a']/(total_current_liabs[i] + total_noncurrent_liabs[i] / 2))) / (va_sigma["Sigma_a"])
         print(f" - 公式2：违约距离：{dd}")
         # 计算违约概率N(-dd)
